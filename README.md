@@ -19,6 +19,8 @@ Pick a frog cart and race three laps. Line up with the yellow boost pads on the 
 | Brake | Hold ↓ or S | Hold Brake |
 | Pause a solo race | P or the Pause button | Tap Pause |
 
+Cloudflare Turnstile checks each request to create or join a room. If it asks you to confirm, complete the check in the room menu. Solo play opens directly from the garage.
+
 In an online race, **Leave race** takes you back to the garage. The other frogs keep racing.
 
 ## Garage and circuits
@@ -50,3 +52,9 @@ Then open [the local garage](http://127.0.0.1:8000/). For multiplayer with frien
 | `wrangler.toml` | Worker name, Durable Object binding, and migration |
 
 GitHub Pages serves the browser game from the repository root. The Cloudflare Worker deploys separately. When changing shared driving physics, update both deployments so solo and multiplayer use the same rules.
+
+## Cloudflare settings
+
+The game page uses Cloudflare Web Analytics for visits and page performance. Open **Web Analytics** in the Cloudflare dashboard and filter by the `/frog-racing/` path when viewing the GitHub Pages hostname.
+
+The multiplayer client uses a public Turnstile site key. The Worker validates each room admission with Siteverify using the `TURNSTILE_SECRET` Worker secret. For a separate deployment, configure the widget for your hostname, set its public key in `race.js`, and set the matching secret with `npx wrangler secret put TURNSTILE_SECRET` before enabling rooms.

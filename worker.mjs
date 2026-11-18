@@ -1,6 +1,22 @@
 import { makeCircuit, drive } from './shared.mjs';
 const alphabet='ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 const origin='https://coolboy354059.github.io';
+async function checkAdmission(req,secret){
+  if(!secret)return false;
+  const protocols=(req.headers.get('Sec-WebSocket-Protocol')||'').split(',').map(p=>p.trim());
+  if(!protocols.includes('frog-racing'))return false;
+  const proof=protocols.find(p=>p.startsWith('proof.'))?.slice(6);
+  if(!proof||proof.length>2731||!/^[A-Za-z0-9_-]+$/.test(proof))return false;
+  try{
+    const token=atob(proof.replace(/-/g,'+').replace(/_/g,'/'));
+    const response=await fetch('https://challenges.cloudflare.com/turnstile/v0/siteverify',{
+      method:'POST',body:new URLSearchParams({secret,response:token}),signal:AbortSignal.timeout(8000)
+    });
+    if(!response.ok)return false;
+    const result=await response.json();
+    return result.success===true&&result.hostname===new URL(origin).hostname&&result.action==='race_room';
+  }catch{return false;}
+}
 export default {
   async fetch(req, env){
     const url=new URL(req.url), path=url.pathname;
@@ -8,9 +24,12 @@ export default {
     if(req.headers.get('Upgrade')?.toLowerCase()!=='websocket'||req.headers.get('Origin')!==origin)return new Response('Game connection required',{status:403});
     const create=path==='/create';
     if(!create&&!/^\/room\/[A-HJ-NP-Z2-9]{6}$/.test(path))return new Response('Unknown room',{status:404});
+    if(!await checkAdmission(req,env.TURNSTILE_SECRET))return new Response('Room verification required',{status:403});
     const code=create?Array.from(crypto.getRandomValues(new Uint8Array(6)),n=>alphabet[n%32]).join(''):path.slice(6);
     url.searchParams.set('code',code);
-    return env.ROOMS.get(env.ROOMS.idFromName(code)).fetch(new Request(url,req));
+    const roomRequest=new Request(url,req);
+    roomRequest.headers.set('Sec-WebSocket-Protocol','frog-racing');
+    return env.ROOMS.get(env.ROOMS.idFromName(code)).fetch(roomRequest);
   }
 };
 export class RaceRoom{
@@ -29,7 +48,7 @@ export class RaceRoom{
     const leave=()=>this.leave(uid);
     socket.addEventListener('close',leave);socket.addEventListener('error',leave);
     socket.send(JSON.stringify({type:'welcome',uid,code:this.code,track:this.track}));this.lobby();
-    return new Response(null,{status:101,webSocket:client});
+    return new Response(null,{status:101,webSocket:client,headers:{'Sec-WebSocket-Protocol':'frog-racing'}});
   }
   index(url,key,max){const n=Number(url.searchParams.get(key));return Number.isInteger(n)&&n>=0&&n<max?n:0;}
   send(packet){const data=JSON.stringify(packet);for(const m of this.members.values()){try{m.socket.send(data);}catch{}}}

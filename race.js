@@ -27,7 +27,7 @@ function togglePause(){
   $('touch').hidden=state==='paused';
   $('result').textContent=state==='paused'?'Race paused':'';
 }
-function garage(){disconnect();$('room').hidden=true;$('online').hidden=false;state='garage';keys.clear();$('setup').hidden=false;$('panel').hidden=false;$('start').hidden=false;$('back').hidden=true;$('hud').hidden=true;$('touch').hidden=true;$('result').textContent='';$('start').textContent='Start race →';}
+function garage(){cancelChallenge();disconnect();$('room').hidden=true;$('online').hidden=false;state='garage';keys.clear();$('setup').hidden=false;$('panel').hidden=false;$('start').hidden=false;$('back').hidden=true;$('hud').hidden=true;$('touch').hidden=true;$('result').textContent='';$('start').textContent='Start race →';}
 $('start').onclick=start;$('pause').onclick=togglePause;$('back').onclick=garage;
 const driveKeys=['arrowup','arrowdown','arrowleft','arrowright','w','a','s','d'];
 addEventListener('keydown',e=>{const k=e.key.toLowerCase();if((state==='race'||state==='paused')&&k==='p'&&!e.repeat)togglePause();if(state==='race'&&driveKeys.includes(k)){e.preventDefault();keys.add(k);}});
@@ -172,12 +172,57 @@ function lobby(){
   $('back').hidden=false;$('room').hidden=false;$('entry').hidden=false;$('roomcode').textContent='';
   $('launch').hidden=true;$('roomInfo').textContent='Create a room on your selected circuit, or join a friend.';
 }
-function connect(create){
+let challengeVersion=0,widgetId=null,libraryPromise=null;
+function cancelChallenge(){
+  challengeVersion++;
+  if(widgetId!==null){window.turnstile.remove(widgetId);widgetId=null;}
+  $('create').disabled=false;$('join').disabled=false;
+}
+function turnstileLibrary(){
+  if(window.turnstile?.render)return Promise.resolve(window.turnstile);
+  if(libraryPromise)return libraryPromise;
+  libraryPromise=new Promise((resolve,reject)=>{
+    const script=document.createElement('script');
+    const timer=setTimeout(failed,12000);
+    function failed(){
+      clearTimeout(timer);script.remove();libraryPromise=null;
+      reject(new Error('Verification could not load'));
+    }
+    script.onload=()=>{clearTimeout(timer);window.turnstile?resolve(window.turnstile):failed();};
+    script.onerror=failed;
+    script.src='https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit';
+    document.head.append(script);
+  });
+  return libraryPromise;
+}
+async function connect(create){
   const code=$('code').value.trim().toUpperCase();
   if(!create&&!/^[A-HJ-NP-Z2-9]{6}$/.test(code)){$('roomInfo').textContent='Enter the six-letter or number code from your friend.';return;}
+  cancelChallenge();
+  const version=challengeVersion;
+  $('create').disabled=true;$('join').disabled=true;
+  $('roomInfo').textContent='Checking with Cloudflare…';
+  function retry(){
+    if(version!==challengeVersion)return;
+    cancelChallenge();$('roomInfo').textContent='Verification could not finish. Select Create room or Join room to try again.';
+  }
+  try{
+    const api=await turnstileLibrary();
+    if(version!==challengeVersion)return;
+    widgetId=api.render($('challenge'),{
+      sitekey:'0x4AAAAAAGG-wlrhggplLItg',action:'race_room',size:'flexible',
+      callback:token=>{
+        if(version!==challengeVersion)return;
+        cancelChallenge();openRoom(create,code,token);
+      },
+      'expired-callback':retry,'timeout-callback':retry,'error-callback':retry
+    });
+  }catch{retry();}
+}
+function openRoom(create,code,token){
   disconnect();$('entry').hidden=true;$('roomInfo').textContent='Connecting…';
   const path=create?'create':'room/'+code;
-  const ws=new WebSocket('wss://frog-racing-rooms.teodorc2000.workers.dev/'+path+'?track='+$('track').selectedIndex+'&cart='+$('cart').selectedIndex);
+  const ws=new WebSocket('wss://frog-racing-rooms.teodorc2000.workers.dev/'+path+'?track='+$('track').selectedIndex+'&cart='+$('cart').selectedIndex,['frog-racing','proof.'+btoa(token).replace(/=+$/,'').replace(/\+/g,'-').replace(/\//g,'_')]);
   connection=ws;const timeout=setTimeout(()=>{if(connection===ws&&ws.readyState!==1)ws.close();},12000);
   ws.onmessage=e=>{
     if(connection!==ws)return;
