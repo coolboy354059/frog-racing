@@ -25,7 +25,20 @@ In an online race, **Leave race** takes you back to the garage. The other frogs 
 
 ## Garage and circuits
 
-There are nine carts. Try **Petal Pilot** for quick steering, **Midnight Meteor** for the highest top speed, or **Cherry Rocket** for a mix of both. The garage shows each cart’s top speed before you start.
+There are 15 carts. Cherry Rocket is free. Preview any other cart in the garage and select **Buy** to unlock it for solo and multiplayer races. Try **Petal Pilot** for quick steering, **Midnight Meteor** for the highest top speed, or **Cherry Rocket** for a mix of both. The garage shows each cart’s top speed before you start.
+
+### Shared coins
+
+Frog Racing and Frog Jumper 2D use the same coin balance when you play their GitHub Pages versions on the same device and browser profile. Existing Frog Jumper coins are ready to spend in the garage. Each track has 12 gold coins per lap. Steer through one to add it to your shared balance immediately. In multiplayer, each racer can collect their own copy. Finishing a solo or multiplayer race earns 15 coins for first place, 10 for second or third, and 5 for any other finish. Cart unlocks stay in that browser profile.
+
+| New cart | Coins |
+| --- | ---: |
+| Acorn Buggy | 20 |
+| Dragonfly GT | 75 |
+| Comet Cab | 60 |
+| Glacier Glide | 85 |
+| Volcano Viper | 100 |
+| Jupiter Express | 125 |
 
 Choose from **Lily Pond Loop**, **Sunset Canyon**, **Pinecone Pass**, **Firefly Marsh**, and **Frostcap Circuit**. Each has its own turns and hills. On the minimap, the large yellow dot is you.
 

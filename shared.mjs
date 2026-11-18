@@ -1,9 +1,12 @@
 export const carts = [
-  ['Cherry Rocket','#fb5148',40,14,9], ['Lily Cruiser','#83d754',38,16,11],
-  ['Honey Hopper','#ffd052',39,17,9], ['Blue Dart','#44a5fe',42,12,8],
-  ['Plum Buggy','#bf83fa',38,15,12], ['Tangerine Turbo','#ff934a',41,13,9],
-  ['Bubble Racer','#5cdeec',39,15,10], ['Petal Pilot','#ff88b3',37,18,12],
-  ['Midnight Meteor','#7085af',43,11,8]
+  ['Cherry Rocket','#fb5148',40,14,9,0], ['Lily Cruiser','#83d754',38,16,11,15],
+  ['Honey Hopper','#ffd052',39,17,9,25], ['Blue Dart','#44a5fe',42,12,8,40],
+  ['Plum Buggy','#bf83fa',38,15,12,35], ['Tangerine Turbo','#ff934a',41,13,9,55],
+  ['Bubble Racer','#5cdeec',39,15,10,45], ['Petal Pilot','#ff88b3',37,18,12,30],
+  ['Midnight Meteor','#7085af',43,11,8,65],
+  ['Acorn Buggy','#bc7145',36,19,13,20], ['Dragonfly GT','#24bfa0',42,14,10,75],
+  ['Comet Cab','#ffbd32',40,16,11,60], ['Glacier Glide','#99daff',41,15,12,85],
+  ['Volcano Viper','#e64827',44,12,9,100], ['Jupiter Express','#db9158',45,11,8,125]
 ];
 // Radius harmonics shape each closed circuit. Heights, colors and scenery vary by venue.
 export const tracks = [
@@ -35,6 +38,11 @@ function locationAt(s,lane=0){
 }
 export const halfWidth=6.3;
 export const padLane=i=>i%2?2.6:-2.6;
+export const coinsPerLap=12;
+export function trackCoin(index,length){
+  const lanes=[0,-2.8,2.8,0,2.8,-2.8];
+  return {s:(index+.5)*length/coinsPerLap,lane:lanes[index%lanes.length]};
+}
 export function drive(player, circuit, mask, dt){
   const {locationAt,length}=circuit, cart=carts[player.id];
   const gas=mask&1, brake=mask&2, steer=Number(Boolean(mask&8))-Number(Boolean(mask&4));
@@ -46,7 +54,17 @@ export function drive(player, circuit, mask, dt){
   const cap=off?19:cart[2]+(player.boost?12:0);
   const acceleration=brake?-31:player.boost?24:gas?cart[3]:-6;
   player.v=clamp(player.v+(player.v>cap?Math.min(-23,acceleration):acceleration)*dt,0,Math.max(cap,player.v));
+  const previous=player.s;
   player.s+=player.v*dt;
+  // Each coin has one crossing point per racer per lap.
+  const spacing=length/coinsPerLap;
+  const first=Math.floor(previous/spacing-.5)+1;
+  const last=Math.min(3*coinsPerLap-1,Math.floor(player.s/spacing-.5));
+  for(let i=first;i<=last;i++){
+    if(Math.abs(player.lane-trackCoin(i,length).lane)<=1.5){
+      player.pickups=(player.pickups||0)+1;
+    }
+  }
   const section=Math.floor(player.s/(length/4)),into=player.s-section*length/4;
   if(into>=46&&into<52&&Math.abs(player.lane-padLane(section))<1.65&&player.lastPad!==section){player.boost=1.7;player.lastPad=section;}
 }

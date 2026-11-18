@@ -1,4 +1,4 @@
-import { makeCircuit, drive } from './shared.mjs';
+import { carts, makeCircuit, drive } from './shared.mjs';
 const alphabet='ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 const origin='https://coolboy354059.github.io';
 async function checkAdmission(req,secret){
@@ -41,9 +41,9 @@ export class RaceRoom{
       this.circuit=makeCircuit(this.track);this.expiry=setTimeout(()=>this.end('Room expired'),10*60*1000);
     }else if(create||this.phase!=='lobby'||this.members.size>=9)return new Response('Room unavailable',{status:409});
     const [client,socket]=Object.values(new WebSocketPair());socket.accept();
-    const uid=++this.next,car={uid,id:this.index(url,'cart',9),s:0,lane:0,v:0,boost:0,lastPad:-1,rank:0};
+    const uid=++this.next,car={uid,id:this.index(url,'cart',carts.length),s:0,lane:0,v:0,boost:0,lastPad:-1,rank:0};
     if(!this.members.size)this.host=uid;
-    this.members.set(uid,{socket,car,mask:0,stamp:0});
+    this.members.set(uid,{socket,car,mask:0,stamp:0,legacy:url.searchParams.get('catalog')!=='2'});
     socket.addEventListener('message',e=>this.message(uid,e.data));
     const leave=()=>this.leave(uid);
     socket.addEventListener('close',leave);socket.addEventListener('error',leave);
@@ -51,7 +51,15 @@ export class RaceRoom{
     return new Response(null,{status:101,webSocket:client,headers:{'Sec-WebSocket-Protocol':'frog-racing'}});
   }
   index(url,key,max){const n=Number(url.searchParams.get(key));return Number.isInteger(n)&&n>=0&&n<max?n:0;}
-  send(packet){const data=JSON.stringify(packet);for(const m of this.members.values()){try{m.socket.send(data);}catch{}}}
+  send(packet){
+    const data=JSON.stringify(packet);
+    let legacyData=data;
+    if(packet.type==='frame'&&packet.cars.some(c=>c.id>=9)&&[...this.members.values()].some(m=>m.legacy)){
+      // Tabs opened before the garage update can only render the original nine models.
+      legacyData=JSON.stringify({...packet,cars:packet.cars.map(c=>c.id<9?c:{...c,id:0})});
+    }
+    for(const m of this.members.values()){try{m.socket.send(m.legacy?legacyData:data);}catch{}}
+  }
   lobby(){this.send({type:'lobby',host:this.host,count:this.members.size});}
   message(uid,data){
     const m=this.members.get(uid);if(!m||typeof data!=='string'||data.length>80)return;

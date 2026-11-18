@@ -1,21 +1,62 @@
 'use strict';
 const $ = id => document.getElementById(id);
 const canvas = $('world'), ctx = canvas.getContext('2d');
-import { carts, tracks, makeCircuit, drive, halfWidth, padLane } from './shared.mjs';
+import { carts, tracks, makeCircuit, drive, halfWidth, padLane, coinsPerLap, trackCoin } from './shared.mjs?v=garage-2';
+import { walletSnapshot, buyCart, earnCoins } from './wallet.mjs';
 const TAU=Math.PI*2,clamp=(n,a,b)=>Math.max(a,Math.min(b,n)),wrap=(n,m)=>((n%m)+m)%m;
 let circuit, track, points, length, locationAt, cart, racers=[], player, state='garage',last=0,clock=0,countdown=3,preview=0,boost=0;
 let keys=new Set(),camera,focal,width,height,center,horizon;
 function buildTrack(){track=tracks[$('track').selectedIndex];circuit=makeCircuit($('track').selectedIndex);({points,length,locationAt}=circuit);}
 function populate(select,items){items.forEach(row=>select.add(new Option(row[0])));}
 populate($('cart'),carts);populate($('track'),tracks);
-function selectCart(){cart=carts[$('cart').selectedIndex];$('spec').textContent=Math.round(cart[2]*3.6)+' km/h · '+(cart[4]>=11?'Quick steering':cart[2]>=41?'High top speed':'All-round handling');}
+let purchasing=false;
+function garageBalance(){try{return walletSnapshot();}catch{return null;}}
+function ownsChoice(){return $('cart').selectedIndex===0||garageBalance()?.owned.has($('cart').selectedIndex);}
+function refreshGarage(){
+  const wallet=garageBalance(),id=$('cart').selectedIndex,owned=id===0||wallet?.owned.has(id),price=carts[id][5];
+  $('balance').textContent=wallet?'🪙 '+wallet.balance.toLocaleString()+' shared coins':'Coin wallet unavailable';
+  for(let i=0;i<carts.length;i++){
+    const unlocked=i===0||wallet?.owned.has(i);
+    $('cart').options[i].textContent=carts[i][0]+(unlocked?'':' · '+carts[i][5]+' coins');
+  }
+  $('buy').hidden=owned;$('buy').disabled=purchasing||!wallet||wallet.balance<price||!navigator.locks;
+  $('buy').textContent=wallet&&wallet.balance<price?'Need '+(price-wallet.balance)+' more coins':'Buy for '+price+' coins';
+  $('start').disabled=!owned||purchasing;$('online').disabled=!owned||purchasing;
+}
+$('buy').onclick=async()=>{
+  if(purchasing)return;
+  const id=$('cart').selectedIndex;purchasing=true;refreshGarage();
+  try{
+    const bought=await buyCart(id,carts[id][5]);
+    $('result').textContent=bought?carts[id][0]+' unlocked!':'You need more coins.';
+  }catch{$('result').textContent='Purchase could not be saved. Check browser storage and try again.';}
+  finally{purchasing=false;refreshGarage();}
+};
+addEventListener('storage',e=>{if(e.key===null||e.key==='frogJumperWalletCoins'||e.key==='frogRacingOwnedCarts')refreshGarage();});
+let countedPickups=0,coinSaveFailed=false;
+function creditPickups(total){
+  if(total<=countedPickups)return;
+  const amount=total-countedPickups;
+  countedPickups=total;
+  Promise.resolve().then(()=>earnCoins(amount)).then(refreshGarage).catch(()=>{coinSaveFailed=true;});
+}
+function rewardFinish(rank){
+  const coins=rank===1?15:rank<=3?10:5;
+  const result=$('result').textContent;
+  Promise.resolve().then(()=>earnCoins(coins)).then(()=>{
+    refreshGarage();if($('result').textContent===result)$('result').textContent+=' · +'+coins+' coins';
+  }).catch(()=>{if($('result').textContent===result)$('result').textContent+=' · Reward could not be saved';});
+}
+function selectCart(){refreshGarage();cart=carts[$('cart').selectedIndex];$('spec').textContent=Math.round(cart[2]*3.6)+' km/h · '+(cart[4]>=11?'Quick steering':cart[2]>=41?'High top speed':'All-round handling');}
 selectCart();buildTrack();
 $('cart').onchange=selectCart;$('track').onchange=buildTrack;
 function grid(){
   player={id:$('cart').selectedIndex,s:0,lane:0,v:0,boost:0,lastPad:-1};
-  racers=carts.map((_,id)=>id).filter(id=>id!==player.id).map((id,i)=>({id,s:4+Math.floor(i/2)*4.4,lane:i%2?2.4:-2.4,v:0}));
+  racers=Array.from({length:8},(_,i)=>(player.id+i+1)%carts.length).map((id,i)=>({id,s:4+Math.floor(i/2)*4.4,lane:i%2?2.4:-2.4,v:0}));
 }
 function start(){
+  if(!connection&&!ownsChoice()){refreshGarage();return;}
+  countedPickups=0;coinSaveFailed=false;
   $('online').hidden=true;grid();clock=0;countdown=3;boost=0;keys.clear();state='race';
   $('panel').hidden=true;$('hud').hidden=false;$('touch').hidden=false;$('pause').textContent='Pause';
 }
@@ -47,7 +88,7 @@ function step(dt){
   if(connection){onlineStep(dt);return;}
   if(countdown>0){countdown-=dt;return;}
   clock+=dt;
-  drive(player,circuit,inputMask(),dt);boost=player.boost;
+  drive(player,circuit,inputMask(),dt);creditPickups(player.pickups||0);boost=player.boost;
   racers.forEach((r,i)=>{
     const target=31+i*.8+2*Math.sin(clock*.4+i);
     r.v=Math.min(target,r.v+dt*(10+i*.5));r.s+=r.v*dt;
@@ -57,7 +98,7 @@ function step(dt){
     }
   });
   if(player.s>=3*length){
-    $('online').hidden=false;state='finish';$('result').textContent='Finished '+ordinal(place())+' of 9 · '+clock.toFixed(1)+' seconds';
+    $('online').hidden=false;state='finish';$('result').textContent='Finished '+ordinal(place())+' of 9 · '+clock.toFixed(1)+' seconds';rewardFinish(place());
     $('panel').hidden=false;$('setup').hidden=false;$('start').textContent='Race again →';$('back').hidden=false;$('hud').hidden=true;$('touch').hidden=true;
   }
 }
@@ -90,6 +131,12 @@ function kart(r){
   }
   billboard(p,()=>ellipse(0,-.02,1.35,.25,'#354442'));
   for(const x of [-1,1])for(const z of [-.85,.85])block(x,.09,z,.22,.63,.42,'#253436');
+  if(r.id===9)block(0,.55,-1,.99,.36,.4,'#714b31');
+  if(r.id===10)for(const side of [-1,1])block(side*1.12,.85,.28,.44,.08,.6,'#aae6d8');
+  if(r.id===11)block(0,1.46,.78,.42,.22,.22,'#ffdd69');
+  if(r.id===12)for(const side of [-1,1])block(side*.99,.13,0,.13,.13,1.53,'#c7ebff');
+  if(r.id===13)for(const side of [-1,1])block(side*.85,.8,-.88,.16,.36,.5,'#ffae39');
+  if(r.id===14)block(0,.73,0,1.31,.15,.95,'#ffdb94');
   block(0,.38,0,.96,.5,1.35,color);block(0,.89,.77,.19,.04,.49,'#fff6d8');
   billboard(corner(0,.83,.04),()=>{
     ellipse(0,-.35,.62,.53,'#409655');ellipse(0,-.99,.77,.54,'#6acb64');
@@ -131,6 +178,19 @@ function paint(){
   }
   const span=4,base=Math.floor(subject.s/span)*span,objects=[];
   const group=demo?[subject]:[player,...racers];
+  if(!demo){
+    const spacing=length/coinsPerLap;
+    const first=Math.max(0,Math.floor(subject.s/spacing-.5)+1);
+    for(let i=first;i<3*coinsPerLap;i++){
+      const coin=trackCoin(i,length);if(coin.s>base+140)break;
+      objects.push({s:coin.s-.3,draw:()=>billboard(locationAt(coin.s,coin.lane),()=>{
+        const bob=.08*Math.sin(clock*4+i);
+        ellipse(0,-1.18+bob,.48,.54,'#ae6a15');
+        ellipse(0,-1.23+bob,.42,.48,'#ffd043');
+        ellipse(-.08,-1.28+bob,.19,.28,'#ffef89');
+      })});
+    }
+  }
   for(const r of group){let ahead=wrap(r.s-subject.s+10,length)-10;if(ahead<145)objects.push({s:subject.s+ahead-1.65,draw:()=>kart(r)});}
   for(let s=base+140;s>=base-12;s-=span){
     const i=Math.floor(wrap(s,length)/span),e=s+span;
@@ -146,7 +206,7 @@ function paint(){
   $('msg').hidden=state!=='race'||(countdown<=0&&boost<=0);
   if(!$('msg').hidden)$('msg').textContent=countdown>0?Math.ceil(countdown):'BOOST!';
   if(state==='race')drawMap(subject,group);
-  if(state==='race')$('stats').textContent=ordinal(place())+' / '+(connection?fieldSize:9)+'   ·   Lap '+clamp(Math.floor(player.s/length)+1,1,3)+' / 3   ·   '+Math.round(player.v*3.6)+' km/h';
+  if(state==='race')$('stats').textContent=ordinal(place())+' / '+(connection?fieldSize:9)+'   ·   Lap '+clamp(Math.floor(player.s/length)+1,1,3)+' / 3   ·   '+Math.round(player.v*3.6)+' km/h   ·   🪙 '+countedPickups+(coinSaveFailed?' (save failed)':'');
 }
 function frame(now){const dt=Math.min((now-last)/1000,.2);last=now;for(let left=dt;left>0;left-=1/60)step(Math.min(left,1/60));paint();requestAnimationFrame(frame);}
 requestAnimationFrame(frame);
@@ -168,6 +228,7 @@ function disconnect(){
   const old=connection;connection=null;targets.clear();if(old)old.close();
 }
 function lobby(){
+  if(!ownsChoice()){garage();return;}
   garage();state='lobby';$('setup').hidden=true;$('start').hidden=true;$('online').hidden=true;
   $('back').hidden=false;$('room').hidden=false;$('entry').hidden=false;$('roomcode').textContent='';
   $('launch').hidden=true;$('roomInfo').textContent='Create a room on your selected circuit, or join a friend.';
@@ -222,7 +283,7 @@ async function connect(create){
 function openRoom(create,code,token){
   disconnect();$('entry').hidden=true;$('roomInfo').textContent='Connecting…';
   const path=create?'create':'room/'+code;
-  const ws=new WebSocket('wss://frog-racing-rooms.teodorc2000.workers.dev/'+path+'?track='+$('track').selectedIndex+'&cart='+$('cart').selectedIndex,['frog-racing','proof.'+btoa(token).replace(/=+$/,'').replace(/\+/g,'-').replace(/\//g,'_')]);
+  const ws=new WebSocket('wss://frog-racing-rooms.teodorc2000.workers.dev/'+path+'?catalog=2&track='+$('track').selectedIndex+'&cart='+$('cart').selectedIndex,['frog-racing','proof.'+btoa(token).replace(/=+$/,'').replace(/\+/g,'-').replace(/\//g,'_')]);
   connection=ws;const timeout=setTimeout(()=>{if(connection===ws&&ws.readyState!==1)ws.close();},12000);
   ws.onmessage=e=>{
     if(connection!==ws)return;
@@ -242,8 +303,8 @@ function openRoom(create,code,token){
       if(player.uid!==uid)player={...mine};
       const previous=new Map(racers.map(r=>[r.uid,r]));
       racers=msg.cars.filter(r=>r.uid!==uid).map(r=>previous.get(r.uid)||{...r});
-      boost=mine.boost;
-      if(mine.rank){garage();$('result').textContent='Finished '+ordinal(mine.rank)+' of '+fieldSize+' · '+mine.time.toFixed(1)+' seconds';}
+      creditPickups(mine.pickups||0);boost=mine.boost;
+      if(mine.rank){garage();$('result').textContent='Finished '+ordinal(mine.rank)+' of '+fieldSize+' · '+mine.time.toFixed(1)+' seconds';rewardFinish(mine.rank);}
     }
   };
   ws.onclose=e=>{
